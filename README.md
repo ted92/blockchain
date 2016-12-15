@@ -1,4 +1,4 @@
-# INF-3995 Understanding Digital Currencies and Blockchain
+# Paying for Bandwidth in Blockchain Internet Applications - University of Tromsø
 
 Observing the Bitcoin blockchain in real time. The system will retreive portion of the Bitcoin blockchain, do data analysis, generating models and plotting the results.
 
