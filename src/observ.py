@@ -35,6 +35,8 @@ from scipy.optimize import curve_fit
 import statsmodels.api as sm
 import matplotlib.lines as mlines
 import matplotlib.axis as ax
+from mpl_toolkits.axes_grid.anchored_artists import AnchoredText
+import json
 
 # ------ GLOBAL ------
 global file_name
@@ -133,7 +135,6 @@ def get_blockchain(number_of_blocks, hash = None):
      str hash: hash of the block from where to start the retrieval
     :return: none
     """
-
     fetch_time_list = []
     epoch_list = []
     creation_time_list = []
@@ -146,6 +147,7 @@ def get_blockchain(number_of_blocks, hash = None):
     list_transactions = []
 
     append_end = False
+    key_error = False
 
     # -------- PROGRESS BAR -----------
     index_progress_bar = 0
@@ -179,43 +181,116 @@ def get_blockchain(number_of_blocks, hash = None):
                 sys.exit()
 
     for i in range(number_of_blocks):
-        # ---------- PROGRESS BAR -----------
-        sleep(0.01)
-        index_progress_bar += 1
-        printProgress(index_progress_bar, number_of_blocks, prefix='Saving Blockchain:', suffix='Complete', barLength=50)
-        # -----------------------------------
+        try:
+            # ---------- PROGRESS BAR -----------
+            sleep(0.01)
+            index_progress_bar += 1
+            printProgress(index_progress_bar, number_of_blocks, prefix='Saving Blockchain:', suffix='Complete', barLength=50)
+            # -----------------------------------
+
+            time_to_fetch = end_time - start_time
+            time_in_seconds = get_time_in_seconds(time_to_fetch)
+            fetch_time_list.append(time_in_seconds)
+
+            if(key_error == False):
+                # ---- List creation
+                epoch = current_block.time
+                epoch_list.append(epoch)
+
+                hash = current_block.hash
+                hash_list.append(hash)
+
+                fee = current_block.fee
+                fee_list.append(fee)
+
+                size = current_block.size
+                size_list.append(size)
+
+                height = current_block.height
+                height_list.append(height)
+
+                avg_tr = get_avg_transaction_time(current_block, False)
+                avg_transaction_list.append(avg_tr)
+
+                block_size = float(size) / 1000000 # -------> calculate read Bandwidth with MB/s
+                bandwidth = block_size / time_in_seconds
+                bandwidth_list.append(bandwidth)
+
+                transactions = current_block.transactions
+                list_transactions.append(len(transactions))
+
+                # --- creation time list
+                start_time = datetime.datetime.now() # -------------------------------------------------------------------------
+                prev_block = blockexplorer.get_block(current_block.previous_block)
+                end_time = datetime.datetime.now()  # --------------------------------------------------------------------------
+                prev_epoch_time = prev_block.time
+                current_creation_time = current_block.time - prev_epoch_time
+                creation_time_list.append(current_creation_time)
+
+                add_mining_nodes(current_block)
+
+                current_block = prev_block
+            else:
+                epoch = current_block["time"]
+                epoch_list.append(epoch)
+
+                hash = current_block["hash"]
+                hash_list.append(hash)
+
+                fee = current_block["fee"]
+                fee_list.append(fee)
+
+                size = current_block["size"]
+                size_list.append(size)
+
+                height = current_block["height"]
+                height_list.append(height)
+
+                avg_tr = get_avg_transaction_time(current_block, True)
+                avg_transaction_list.append(avg_tr)
+
+                block_size = float(size) / 1000000  # -------> calculate read Bandwidth with MB/s
+                bandwidth = block_size / time_in_seconds
+                bandwidth_list.append(bandwidth)
+
+                transactions = len(current_block["tx"])
+                list_transactions.append(transactions)
+
+                prev_block = current_block["prev_block"]
+                start_time = datetime.datetime.now()  # ------------------------------------------------------------------------
+                prev_block = blockexplorer.get_block(prev_block)
+                end_time = datetime.datetime.now()  # --------------------------------------------------------------------------
+
+                prev_epoch_time = prev_block.time
+                current_creation_time = current_block["time"] - prev_epoch_time
+                creation_time_list.append(current_creation_time)
+
+                # add_mining_nodes(current_block)
+
+                current_block = prev_block
+
+                key_error = False
 
 
-        # ---- List creation
-        time_to_fetch = end_time - start_time
-        time_in_seconds = get_time_in_seconds(time_to_fetch)
-        fetch_time_list.append(time_in_seconds)
-        epoch_list.append(current_block.time)
-        hash_list.append(current_block.hash)
-        fee_list.append(current_block.fee)
-        size_list.append(current_block.size)
-        height_list.append(current_block.height)
-        avg_transaction_list.append(get_avg_transaction_time(current_block))
+        except KeyError:
+            # retreive block from the website
+            # -- URL
+            start_time = datetime.datetime.now()  # -------------------------------------------------------------------------
+            json_req = urllib2.urlopen(
+                "https://blockchain.info/block-index/" + current_block.previous_block + "?format=json").read()
+            end_time = datetime.datetime.now()  # ---------------------------------------------------------------------------
 
-        block_size = float(current_block.size) / 1000000 # -------> calculate read Bandwidth with MB/s
-        bandwidth = block_size / time_in_seconds
-        bandwidth_list.append(bandwidth)
+            prev_block = json.loads(json_req)
+            prev_epoch_time = prev_block["time"]
+            current_creation_time = current_block.time - prev_epoch_time
+            creation_time_list.append(current_creation_time)
 
-        transactions = current_block.transactions
-        list_transactions.append(len(transactions))
+            # add_mining_nodes(current_block)
 
-        # --- creation time list
-        start_time = datetime.datetime.now() # -------------------------------------------------------------------------
-        prev_block = blockexplorer.get_block(current_block.previous_block)
-        end_time = datetime.datetime.now()  # --------------------------------------------------------------------------
-        prev_epoch_time = prev_block.time
-        current_creation_time = current_block.time - prev_epoch_time
-        creation_time_list.append(current_creation_time)
+            current_block = prev_block
 
-        add_mining_nodes(current_block)
-
-        current_block = prev_block
-
+            key_error = True
+            # ------
     # writing all the data retrieved in the file
     write_blockchain(hash_list, epoch_list, creation_time_list, size_list, fee_list, height_list, bandwidth_list, list_transactions, avg_transaction_list, append_end)
 
@@ -455,33 +530,46 @@ def get_time_in_seconds(time_to_fetch):
     return time_to_return
 
 
-def get_avg_transaction_time(block):
+def get_avg_transaction_time(block, json):
     """
     get the average time, per block, of the time that a transaction
     take to be visible in the blockchain after it has been requested.
 
     :param block: the block to be analized
+    :param json: if true, the json version of the block needs to be analyzed
     :return: int: return the average of the time of all the transactions in the block
     """
-    # take transactions the block
-    transactions = block.transactions
 
-    # get block time -- when it is visible in the blockchain, so when it was created
-    block_time = block.time
+    if(json == True):
+        block_time = float(block["time"])
+        tx = block["tx"]
 
-    # list of time of each transactions in one block
-    transactions_time_list = []
+        t_sum = 0
+        for t in tx:
+            approval_time = block_time - float(t["time"])
+            t_sum = t_sum + approval_time
 
-    # list of the time that each transaction take to be visible, so when the block is visible in the blockchain
-    time_to_be_visible = []
+        average_per_block = t_sum / len(tx)
+    else:
+        # take transactions the block
+        transactions = block.transactions
 
-    for t in transactions:
-        transactions_time_list.append(float(t.time))
+        # get block time -- when it is visible in the blockchain, so when it was created
+        block_time = block.time
 
-    for t_time in transactions_time_list:
-        time_to_be_visible.append(float(block_time - t_time))
+        # list of time of each transactions in one block
+        transactions_time_list = []
 
-    average_per_block = sum(time_to_be_visible) / len(time_to_be_visible)
+        # list of the time that each transaction take to be visible, so when the block is visible in the blockchain
+        time_to_be_visible = []
+
+        for t in transactions:
+            transactions_time_list.append(float(t.time))
+
+        for t_time in transactions_time_list:
+            time_to_be_visible.append(float(block_time - t_time))
+
+        average_per_block = sum(time_to_be_visible) / len(time_to_be_visible)
     return average_per_block
 
 
@@ -562,6 +650,7 @@ def plot_data(description, plot_number, regression = None, start = None, end = N
     list_blockchain_time = datetime_retrieved(start, end)
     plt.figure(plot_number)
     plt.rc('lines', linewidth=1)
+    axes = plt.gca()
 
     if(description == "time_per_block"):
         x_vals = get_list_from_file("creation_time")
@@ -572,7 +661,6 @@ def plot_data(description, plot_number, regression = None, start = None, end = N
         plt.legend(loc="best")
         plt.ylabel("time (min)")
         plt.xlabel("block number")
-        axes = plt.gca()
         axes.set_xlim([0, len(x_vals)])
 
         plt.savefig('plot/' + description + '(' + str(len(x_vals)) + ')')
@@ -583,14 +671,24 @@ def plot_data(description, plot_number, regression = None, start = None, end = N
         x_vals[:] = [x / 1000000 for x in x_vals]
         x_vals = x_vals[end:start]
         plt.plot(x_vals, 'go', label=(
-        "block size (Mb)\n" + str(list_blockchain_time[0]) + "\n" + str(list_blockchain_time[1])))
+        "block size (Mb)"))
         plt.legend(loc="best")
         plt.ylabel("size (Mb)")
         plt.xlabel("block number")
-        axes = plt.gca()
         axes.set_xlim([0, len(x_vals)])
         max_in_list = max(x_vals)
         axes.set_ylim([0, max_in_list*1.4])
+
+        # label of the time
+
+        at = AnchoredText(list_blockchain_time[0],prop=dict(size=8), frameon=True,loc=3,)
+        at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
+        axes.add_artist(at)
+
+        at = AnchoredText(list_blockchain_time[1], prop=dict(size=8), frameon=True, loc=4,)
+        at.patch.set_boxstyle("round,pad=0.,rounding_size=0.2")
+        axes.add_artist(at)
+        # end label of the time
 
         plt.savefig('plot/' + description + '(' + str(len(x_vals)) + ')')
         print("plot " + description + ".png created")
@@ -603,7 +701,6 @@ def plot_data(description, plot_number, regression = None, start = None, end = N
         plt.legend(loc="best")
         plt.ylabel("read bandwidth (Mb/s)")
         plt.xlabel("block number")
-        axes = plt.gca()
         axes.set_xlim([0, len(x_vals)])
         max_in_list = max(x_vals)
         axes.set_ylim([0, max_in_list * 1.2])
@@ -643,7 +740,6 @@ def plot_data(description, plot_number, regression = None, start = None, end = N
 
         plt.ylabel("size (GB)")
         plt.xlabel("time (h)")
-        axes = plt.gca()
         # axes.set_xlim([0, max(x_vals)])
 
         if(regression):
@@ -685,9 +781,7 @@ def plot_data(description, plot_number, regression = None, start = None, end = N
         plt.legend(loc="best")
         plt.ylabel("time (min)")
         plt.xlabel("block number")
-        axes = plt.gca()
         axes.set_xlim([0, len(x_vals)])
-
 
         plt.savefig('plot/' + description + '(' + str(len(x_vals)) + ')')
         print("plot " + description + ".png created")
@@ -710,7 +804,6 @@ def plot_data(description, plot_number, regression = None, start = None, end = N
         plt.plot(x_vals_size, 'go', label="Block Size (kb)")
         plt.legend(loc="best")
         plt.xlabel("block number")
-        axes = plt.gca()
         axes.set_xlim([0, len(x_vals_size)])
 
         plt.savefig('plot/' + description + '(' + str(len(x_vals_size)) + ')')
@@ -731,7 +824,6 @@ def plot_data(description, plot_number, regression = None, start = None, end = N
             "fee paid\n" + str(list_blockchain_time[0]) + "\n" + str(list_blockchain_time[1])))
         plt.ylabel("fee (BTC)")
         plt.xlabel("creation time (min)")
-        axes = plt.gca()
         axes.set_xlim([0, max(x_vals)])
         axes.set_ylim([0, 2.5])
 
@@ -768,7 +860,6 @@ def plot_data(description, plot_number, regression = None, start = None, end = N
             "transaction visibility\n" + str(list_blockchain_time[0]) + "\n" + str(list_blockchain_time[1])))
         plt.xlabel("$\overline{T_p}$ (BTC)")
         plt.ylabel("transaction visibility (min)")
-        axes = plt.gca()
         axes.set_ylim([0, max(y_vals)/10])
         axes.set_xlim([0, 0.006])
 
